@@ -1,0 +1,86 @@
+base_model: Qwen/Qwen2.5-3B-Instruct
+# Automatically upload checkpoint and final model to HF
+# hub_model_id: username/custom_model_name
+
+load_in_8bit: false
+load_in_4bit: false
+strict: false
+
+torch_compile: true
+
+rl: grpo
+trl:
+  beta: 0.001
+  use_vllm: true
+  vllm_gpu_memory_utilization: 0.85
+  reward_funcs:
+    - r1_grpo_code.soft_format_reward_func
+    # - r1_grpo_code.strict_format_reward_func
+    # - r1_grpo_code.correctness_reward_func
+    # filtered
+    # - r1_grpo_code.multiprocessing_filtered_answer_reward_func
+    # - r1_grpo_code.multiprocessing_filtered_compiles_reward_func
+    - r1_grpo_code.multiprocessing_answer_reward_func
+    # - r1_grpo_code.multiprocessing_soft_pass_k_answer_reward_func
+    - r1_grpo_code.multiprocessing_compiles_reward_func
+    - wasm_env.does_compile_syntax_check_reward_func
+  num_generations: 16
+  max_completion_length: 512
+  use_liger_loss: true
+  log_completions: true
+
+chat_template: qwen_25
+datasets:
+  - path: axolotl-ai-co/AceCode-87K
+    type: r1_grpo_code.axolotl_acecode_transform
+    
+dataset_prepared_path: /workspace/data/last_run_prepared
+dataset_processes:
+skip_prepare_dataset: true
+val_set_size: 0.0
+output_dir: /workspace/data/axolotl-artifacts/r1-outputs/code-example
+
+
+
+
+dataloader_prefetch_factor: 32
+dataloader_num_workers: 2
+dataloader_pin_memory: true
+
+gc_steps: 1
+sequence_len: 800
+sample_packing: false
+eval_sample_packing: false
+pad_to_sequence_len: false
+
+gradient_accumulation_steps: 2
+micro_batch_size: 16
+num_epochs: 1
+
+optimizer: paged_adamw_32bit
+lr_scheduler: constant_with_warmup
+learning_rate: 1.0e-6
+max_grad_norm: 1.0
+
+train_on_inputs: false
+group_by_length: false
+
+bf16: true
+tf32: true
+early_stopping_patience:
+resume_from_checkpoint:
+local_rank:
+logging_steps: 1
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+flash_attention: true
+
+warmup_steps: 100
+evals_per_epoch: 1
+saves_per_epoch: 4
+
+
+wandb_project: acecode-grpo-r[[1
+wandb_entity:
+wandb_name: passk
