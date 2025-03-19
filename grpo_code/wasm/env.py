@@ -11,6 +11,8 @@ class PythonWasmEnvironment:
         self.wasm_path = wasm_path
         self.fuel = fuel
 
+        self._verify_wasm_integrity()
+
         # Set up the engine and linker
         engine_cfg = Config()
         engine_cfg.consume_fuel = True
