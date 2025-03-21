@@ -4,9 +4,10 @@
 pip install uv
 uv venv
 source .venv/bin/activate
-uv sync
-uv pip install --no-build-isolation setuptools wheel
-uv pip install --no-deps git+https://github.com/axolotl-ai-cloud/axolotl.git[flash-attn,deepspeed,vllm]
+uv pip install -e .
+uv pip install -U packaging setuptools wheel ninja
+uv pip install --no-build-isolation git+https://github.com/axolotl-ai-cloud/axolotl.git
+uv pip install vllm==0.7.2 flash-attn 
 uv pip install --no-deps git+https://github.com/huggingface/trl.git@main
 ```
 

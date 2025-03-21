@@ -129,18 +129,6 @@ def multiprocessing_compile_env_reward_func(completions: list[list[dict]], **kwa
     return results
 
 
-def multiprocessing_compiles_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
-    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
-    max_processes = min(len(model_answers), MAX_PROCESSES)
-
-    with Pool(processes=max_processes) as pool:
-        # Map does_compile to each model answer, then transform results to 0.5 for success, -0.25 for failure
-        raw_results = pool.map(does_compile, model_answers)
-
-    compile_rewards = [0.5 if result == 1.0 else -0.25 for result in raw_results]
-    return compile_rewards
-
-
 def multiprocessing_answer_env_reward_func(
     completions: list[list[dict]], answers: list[list[str]], **kwargs
 ) -> list[float]:
@@ -155,35 +143,6 @@ def multiprocessing_answer_env_reward_func(
     max_processes = min(len(tasks), MAX_PROCESSES)
     with Pool(processes=max_processes) as pool:
         results = pool.map(does_execute, tasks)
-
-    # Reconstruct results by completion
-    rewards = [0.0] * len(completions)
-    result_idx = 0
-    for i in range(len(completions)):
-        test_case_count = len(answers[i])
-        completion_results = results[result_idx : result_idx + test_case_count]
-        result_idx += test_case_count
-        accuracy = sum(completion_results) / test_case_count
-        rewards[i] = math.pow(accuracy, 2) * 2  # Square and multiply by 2 as in other functions
-
-    return rewards
-
-
-def multiprocessing_answer_reward_func(
-    completions: list[list[dict]], answers: list[list[str]], **kwargs
-) -> list[float]:
-    # First extract answers, then check compilation
-    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
-    tasks = []
-    for i in range(len(model_answers)):
-        for test_case in answers[i]:
-            tasks.append(model_answers[i] + "\n" + test_case)
-
-    # flatten tests to maximize throughput
-    max_processes = min(len(tasks), MAX_PROCESSES)
-
-    with Pool(processes=max_processes) as pool:
-        results = pool.map(does_compile, tasks)
 
     # Reconstruct results by completion
     rewards = [0.0] * len(completions)
@@ -282,58 +241,66 @@ if __name__ == "__main__":
         ]
         num_copies = 16
         large_completions = example_completion * num_copies
-        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * 32
-
+        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * 16
+        
+        # Number of runs for averaging
+        num_runs = 100
+        
         print("-" * 100)
         print(f"Testing with {num_copies} copies of the example completion")
+        print(f"Running each test {num_runs} times and reporting averages")
         print("-" * 100)
 
-        # Test multiprocessing_compile_env_reward_func
-        start_time = time.time()
-        mp_compile_env_results = multiprocessing_compile_env_reward_func(large_completions)
-        mp_compile_time = time.time() - start_time
-        print(mp_compile_env_results)
-        print(f"multiprocessing_compile_env_reward_func time: {mp_compile_time:.4f} seconds")
-        print("-" * 100)
+        # Run each test multiple times and track total execution times
+        mp_compile_env_total_time = 0
+        mp_answer_env_total_time = 0
+        mp_soft_format_total_time = 0
+        mp_compile_syntax_check_total_time = 0
+        total_run_time = 0
 
-        # Test multiprocessing_compiles_reward_func
-        start_time = time.time()
-        mp_compile_results = multiprocessing_compiles_reward_func(large_completions)
-        mp_compile_time = time.time() - start_time
-        print(mp_compile_results)
-        print(f"multiprocessing_compiles_reward_func time: {mp_compile_time:.4f} seconds")
-        print("-" * 100)
+        for i in range(num_runs):
+            run_start_time = time.time()
+            
+            if i % 10 == 0:
+                print(f"Run {i+1}/{num_runs}...")
+                
+            # Test multiprocessing_compile_env_reward_func
+            start_time = time.time()
+            mp_compile_env_results = multiprocessing_compile_env_reward_func(large_completions)
+            mp_compile_env_total_time += time.time() - start_time
 
-        # Test multiprocessing_answer_reward_func
-        start_time = time.time()
-        mp_accuracy_results = multiprocessing_answer_reward_func(large_completions, large_answers)
-        mp_accuracy_time = time.time() - start_time
-        print(f"multiprocessing_answer_reward_func time: {mp_accuracy_time:.4f} seconds")
-        print("-" * 100)
+            # Test multiprocessing_answer_env_reward_func
+            start_time = time.time()
+            mp_answer_env_results = multiprocessing_answer_env_reward_func(large_completions, large_answers)
+            mp_answer_env_total_time += time.time() - start_time
 
-        # Test multiprocessing_answer_env_reward_func
-        start_time = time.time()
-        mp_accuracy_env_results = multiprocessing_answer_env_reward_func(large_completions, large_answers)
-        mp_accuracy_env_time = time.time() - start_time
-        print(f"multiprocessing_answer_env_reward_func time: {mp_accuracy_env_time:.4f} seconds")
-        print("-" * 100)
+            # Test multiprocessing_soft_format_reward_func
+            start_time = time.time()
+            mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
+            mp_soft_format_total_time += time.time() - start_time
 
-        # Test multiprocessing_soft_format_reward_func
-        start_time = time.time()
-        mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
-        mp_soft_format_time = time.time() - start_time
-        print(mp_soft_format_results)
-        print(f"multiprocessing_soft_format_reward_func time: {mp_soft_format_time:.4f} seconds")
-        print("-" * 100)
+            # Test multiprocessing_does_compile_syntax_check_reward_func
+            start_time = time.time()
+            mp_compile_syntax_check_results = multiprocessing_does_compile_syntax_check_reward_func(large_completions)
+            mp_compile_syntax_check_total_time += time.time() - start_time
+            
+            # Calculate total time for this run
+            run_time = time.time() - run_start_time
+            total_run_time += run_time
+            
+            if i % 10 == 0:
+                print(f"  Run {i+1} completed in {run_time:.4f} seconds")
 
-        # Test multiprocessing_does_compile_syntax_check_reward_func
-        start_time = time.time()
-        mp_compile_syntax_check_results = multiprocessing_does_compile_syntax_check_reward_func(large_completions)
-        mp_compile_syntax_check_time = time.time() - start_time
-        print(mp_compile_syntax_check_results)
-        print(
-            f"multiprocessing_does_compile_syntax_check_reward_func time: {mp_compile_syntax_check_time:.4f} seconds"
-        )
+        # Calculate and print average times
+        print("-" * 100)
+        print("AVERAGE EXECUTION TIMES OVER", num_runs, "RUNS:")
+        print("-" * 100)
+        print(f"multiprocessing_compile_env_reward_func avg time: {mp_compile_env_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_answer_env_reward_func avg time: {mp_answer_env_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_does_compile_syntax_check_reward_func avg time: {mp_compile_syntax_check_total_time/num_runs:.4f} seconds")
+        print(f"Average total time per run: {total_run_time/num_runs:.4f} seconds")
+        print(f"Total benchmark time: {total_run_time:.4f} seconds")
         print("-" * 100)
 
     finally:

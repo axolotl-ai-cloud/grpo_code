@@ -2,7 +2,6 @@
 name = "grpo_code"
 dependencies = [
     "wasmtime",
-    "torch>=2.5.1",
 ]
 version = "0.1.0"
 

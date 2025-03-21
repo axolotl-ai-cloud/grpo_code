@@ -53,7 +53,8 @@ class PythonWasmEnvironment:
 
 
 # Maximum number of processes to use
-MAX_PROCESSES = min(64, os.cpu_count() or 1)
+WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
+MAX_PROCESSES = min(64, os.cpu_count()) // WORLD_SIZE
 
 # Global process pool
 _process_pool = None
@@ -221,41 +222,66 @@ if __name__ == "__main__":
         ]
         num_copies = 16
         large_completions = example_completion * num_copies
-        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * 32
+        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * 16
 
+        # Number of runs for averaging
+        num_runs = 100
+        
         print("-" * 100)
         print(f"Testing with {num_copies} copies of the example completion")
+        print(f"Running each test {num_runs} times and reporting averages")
         print("-" * 100)
 
-        # Test code execution reward function
-        start_time = time.time()
-        mp_execution_results = multiprocessing_code_execution_reward_func(large_completions)
-        mp_execution_time = time.time() - start_time
-        print(mp_execution_results)
-        print(f"multiprocessing_code_execution_reward_func time: {mp_execution_time:.4f} seconds")
-        print("-" * 100)
+        # Run each test multiple times and track total execution times
+        mp_execution_total_time = 0
+        mp_answer_execution_total_time = 0
+        mp_soft_format_total_time = 0
+        mp_syntax_check_total_time = 0
+        total_run_time = 0
 
-        # Test multiprocessing_answer_execution_reward_func
-        start_time = time.time()
-        mp_answer_execution_results = multiprocessing_answer_execution_reward_func(large_completions, large_answers)
-        mp_answer_execution_time = time.time() - start_time
-        print(f"multiprocessing_answer_execution_reward_func time: {mp_answer_execution_time:.4f} seconds")
-        print("-" * 100)
+        for i in range(num_runs):
+            run_start_time = time.time()
+            
+            if i % 10 == 0:
+                print(f"Run {i+1}/{num_runs}...")
+                
+            # Test code execution reward function
+            start_time = time.time()
+            mp_execution_results = multiprocessing_code_execution_reward_func(large_completions)
+            mp_execution_total_time += time.time() - start_time
 
-        # Test multiprocessing_soft_format_reward_func
-        start_time = time.time()
-        mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
-        mp_soft_format_time = time.time() - start_time
-        print(mp_soft_format_results)
-        print(f"multiprocessing_soft_format_reward_func time: {mp_soft_format_time:.4f} seconds")
-        print("-" * 100)
+            # Test multiprocessing_answer_execution_reward_func
+            start_time = time.time()
+            mp_answer_execution_results = multiprocessing_answer_execution_reward_func(large_completions, large_answers)
+            mp_answer_execution_total_time += time.time() - start_time
 
-        # Test multiprocessing_syntax_check_reward_func
-        start_time = time.time()
-        mp_syntax_check_results = multiprocessing_syntax_check_reward_func(large_completions)
-        mp_syntax_check_time = time.time() - start_time
-        print(mp_syntax_check_results)
-        print(f"multiprocessing_syntax_check_reward_func time: {mp_syntax_check_time:.4f} seconds")
+            # Test multiprocessing_soft_format_reward_func
+            start_time = time.time()
+            mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
+            mp_soft_format_total_time += time.time() - start_time
+
+            # Test multiprocessing_syntax_check_reward_func
+            start_time = time.time()
+            mp_syntax_check_results = multiprocessing_syntax_check_reward_func(large_completions)
+            mp_syntax_check_total_time += time.time() - start_time
+            
+            # Calculate total time for this run
+            run_time = time.time() - run_start_time
+            total_run_time += run_time
+            
+            if i % 10 == 0:
+                print(f"  Run {i+1} completed in {run_time:.4f} seconds")
+
+        # Calculate and print average times
+        print("-" * 100)
+        print("AVERAGE EXECUTION TIMES OVER", num_runs, "RUNS:")
+        print("-" * 100)
+        print(f"multiprocessing_code_execution_reward_func avg time: {mp_execution_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_answer_execution_reward_func avg time: {mp_answer_execution_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_syntax_check_reward_func avg time: {mp_syntax_check_total_time/num_runs:.4f} seconds")
+        print(f"Average total time per run: {total_run_time/num_runs:.4f} seconds")
+        print(f"Total benchmark time: {total_run_time:.4f} seconds")
         print("-" * 100)
 
     finally:
