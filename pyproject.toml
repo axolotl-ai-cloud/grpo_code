@@ -1,0 +1,16 @@
+[project]
+name = "grpo_code"
+dependencies = [
+    "wasmtime",
+    "torch>=2.5.1",
+]
+version = "0.1.0"
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["grpo_code*"]

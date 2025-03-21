@@ -1,7 +1,14 @@
 ## Installation
 
-
-
+```bash
+pip install uv
+uv venv
+source .venv/bin/activate
+uv sync
+uv pip install --no-build-isolation setuptools wheel
+uv pip install --no-deps git+https://github.com/axolotl-ai-cloud/axolotl.git[flash-attn,deepspeed,vllm]
+uv pip install --no-deps git+https://github.com/huggingface/trl.git@main
+```
 
 
 ## Evals
