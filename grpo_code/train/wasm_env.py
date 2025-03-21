@@ -1,0 +1,308 @@
+from multiprocessing import Pool
+import os
+import re
+from wasmtime import Config, Engine, Linker, Module, Store, WasiConfig
+import math
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+# Define extract_xml_answer here to avoid circular import
+def extract_xml_answer(text):
+    """Extract the answer from the XML tags."""
+    match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+class PythonWasmEnvironment:
+    """A reusable WASM environment for running Python code."""
+
+    def __init__(self, wasm_path="../wasm/python-3.12.0.wasm", fuel=1_000_000_000):
+        """Initialize the WASM environment."""
+        self.wasm_path = wasm_path
+        self.fuel = fuel
+
+        # Set up the engine and linker
+        engine_cfg = Config()
+        engine_cfg.consume_fuel = True
+        engine_cfg.cache = True
+
+        self.engine = Engine(engine_cfg)
+        self.linker = Linker(self.engine)
+        self.linker.define_wasi()
+
+        # Load the Python module
+        self.python_module = Module.from_file(self.engine, self.wasm_path)
+
+    def run_code(self, code):
+        """Run Python code in the WASM environment."""
+        config = WasiConfig()
+        config.argv = ("python", "-c", code)
+
+        store = Store(self.engine)
+        store.set_fuel(self.fuel)
+        store.set_wasi(config)
+
+        instance = self.linker.instantiate(store, self.python_module)
+        start = instance.exports(store)["_start"]
+
+        start(store)
+
+
+global env
+env = PythonWasmEnvironment()
+MAX_PROCESSES = 64
+
+
+def does_execute(code: str) -> bool:
+    try:
+        env.run_code(code)
+        return 1.0
+    except Exception as e:
+        return 0.0
+
+
+def does_compile(predicted_answer: str, **kwargs) -> float:
+    try:
+        run_python_code(predicted_answer)
+        return 1.0
+    except Exception as e:
+        return 0.0
+
+
+def run_python_code(code: str, fuel: int = 1_000_000_000) -> str:
+    """
+    Run Python code in a WASM environment with a configurable fuel limit.
+
+    Args:
+        code: The Python code to execute
+        fuel: The maximum number of instructions to execute
+              - 1M: Simple syntax checks
+              - 10M: Basic test cases
+              - 100M: Standard workloads (default)
+              - 500M: Complex algorithms
+              - 1B+: Very intensive operations
+
+    Returns:
+        The result of the execution
+    """
+    engine_cfg = Config()
+    engine_cfg.consume_fuel = True
+    engine_cfg.cache = True
+
+    linker = Linker(Engine(engine_cfg))
+    linker.define_wasi()
+
+    python_module = Module.from_file(linker.engine, "wasm/python-3.12.0.wasm")
+
+    config = WasiConfig()
+
+    config.argv = ("python", "-c", code)
+
+    store = Store(linker.engine)
+
+    store.set_fuel(fuel)
+    store.set_wasi(config)
+    instance = linker.instantiate(store, python_module)
+
+    start = instance.exports(store)["_start"]
+    start(store)
+
+
+def compile_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
+    """
+    Reward function for compiling the code.
+    """
+    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+    return [does_compile(model_answer) for model_answer in model_answers]
+
+
+def multiprocessing_compile_env_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
+    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+    max_processes = min(len(model_answers), MAX_PROCESSES)
+
+    with Pool(processes=max_processes) as pool:
+        results = pool.map(does_execute, model_answers)
+    results = [0.5 if result == 1.0 else -0.25 for result in results]
+    return results
+
+
+def multiprocessing_answer_env_reward_func(
+    completions: list[list[dict]], answers: list[list[str]], **kwargs
+) -> list[float]:
+    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+
+    tasks = []
+    for i in range(len(model_answers)):
+        for test_case in answers[i]:
+            tasks.append(model_answers[i] + "\n" + test_case)
+
+    # flatten tests to maximize throughput
+    max_processes = min(len(tasks), MAX_PROCESSES)
+    with Pool(processes=max_processes) as pool:
+        results = pool.map(does_execute, tasks)
+
+    # Reconstruct results by completion
+    rewards = [0.0] * len(completions)
+    result_idx = 0
+    for i in range(len(completions)):
+        test_case_count = len(answers[i])
+        completion_results = results[result_idx : result_idx + test_case_count]
+        result_idx += test_case_count
+        accuracy = sum(completion_results) / test_case_count
+        rewards[i] = math.pow(accuracy, 2) * 2  # Square and multiply by 2 as in other functions
+
+    return rewards
+
+
+def calculate_accuracy(completion: str, answers: list[str], **kwargs) -> float:
+    """
+    Reward function for having the correct answer.
+    """
+    score = 0
+    for test_case in answers:
+        score += does_execute(completion + "\n" + test_case)
+    accuracy = score / len(answers)
+    return math.pow(accuracy, 2) * 2
+
+
+def soft_format_reward_func(completions, **kwargs) -> list[float]:
+    """
+    Reward function that loosely checks if the completion has a specific format,
+    without penalizing adherence to newlines.
+    """
+    pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>.*"
+    responses = [completion[0]["content"] for completion in completions]
+    matches = [re.match(pattern, r, re.S) for r in responses]
+    return [0.25 if match else 0.0 for match in matches]
+
+
+def check_format(text):
+    return 0.25 if re.match(r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>.*", text, re.S) else 0.0
+
+
+def multiprocessing_soft_format_reward_func(completions, **kwargs) -> list[float]:
+    """
+    Reward function that loosely checks if the completion has a specific format,
+    without penalizing adherence to newlines.
+    """
+    responses = [completion[0]["content"] for completion in completions]
+    max_processes = min(len(responses), MAX_PROCESSES)
+    with Pool(processes=max_processes) as pool:
+        results = pool.map(check_format, responses)
+    return results
+
+
+def does_compile_syntax_check(predicted_answer: str, **kwargs) -> float:
+
+    try:
+        compile(predicted_answer, "<string>", "exec")
+        return 0.25
+    except Exception as e:
+        return -0.1
+
+
+def does_compile_syntax_check_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
+    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+    return [does_compile_syntax_check(model_answer) for model_answer in model_answers]
+
+
+def multiprocessing_does_compile_syntax_check_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
+    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+    max_processes = min(len(model_answers), MAX_PROCESSES)
+    with Pool(processes=max_processes) as pool:
+        compile_rewards = pool.map(does_compile_syntax_check, model_answers)
+    return compile_rewards
+
+
+if __name__ == "__main__":
+    try:
+        import time
+
+        # Print CPU information
+        print(f"Number of CPU cores available: {os.cpu_count()}")
+
+        example_completion = [
+            [
+                {
+                    "role": "user",
+                    "content": """
+        <reasoning>
+        ...
+        </reasoning>
+        <answer>
+        def foo(a):
+            return a + 1
+        </answer>""",
+                }
+            ]
+        ]
+        num_copies = 16
+        large_completions = example_completion * num_copies
+        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * 16
+        
+        # Number of runs for averaging
+        num_runs = 100
+        
+        print("-" * 100)
+        print(f"Testing with {num_copies} copies of the example completion")
+        print(f"Running each test {num_runs} times and reporting averages")
+        print("-" * 100)
+
+        # Run each test multiple times and track total execution times
+        mp_compile_env_total_time = 0
+        mp_answer_env_total_time = 0
+        mp_soft_format_total_time = 0
+        mp_compile_syntax_check_total_time = 0
+        total_run_time = 0
+
+        for i in range(num_runs):
+            run_start_time = time.time()
+            
+            if i % 10 == 0:
+                print(f"Run {i+1}/{num_runs}...")
+                
+            # Test multiprocessing_compile_env_reward_func
+            start_time = time.time()
+            mp_compile_env_results = multiprocessing_compile_env_reward_func(large_completions)
+            mp_compile_env_total_time += time.time() - start_time
+
+            # Test multiprocessing_answer_env_reward_func
+            start_time = time.time()
+            mp_answer_env_results = multiprocessing_answer_env_reward_func(large_completions, large_answers)
+            mp_answer_env_total_time += time.time() - start_time
+
+            # Test multiprocessing_soft_format_reward_func
+            start_time = time.time()
+            mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
+            mp_soft_format_total_time += time.time() - start_time
+
+            # Test multiprocessing_does_compile_syntax_check_reward_func
+            start_time = time.time()
+            mp_compile_syntax_check_results = multiprocessing_does_compile_syntax_check_reward_func(large_completions)
+            mp_compile_syntax_check_total_time += time.time() - start_time
+            
+            # Calculate total time for this run
+            run_time = time.time() - run_start_time
+            total_run_time += run_time
+            
+            if i % 10 == 0:
+                print(f"  Run {i+1} completed in {run_time:.4f} seconds")
+
+        # Calculate and print average times
+        print("-" * 100)
+        print("AVERAGE EXECUTION TIMES OVER", num_runs, "RUNS:")
+        print("-" * 100)
+        print(f"multiprocessing_compile_env_reward_func avg time: {mp_compile_env_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_answer_env_reward_func avg time: {mp_answer_env_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_does_compile_syntax_check_reward_func avg time: {mp_compile_syntax_check_total_time/num_runs:.4f} seconds")
+        print(f"Average total time per run: {total_run_time/num_runs:.4f} seconds")
+        print(f"Total benchmark time: {total_run_time:.4f} seconds")
+        print("-" * 100)
+
+    finally:
+        # No explicit cleanup needed in this version as pools are created and destroyed per function call
+        pass

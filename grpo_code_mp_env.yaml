@@ -29,7 +29,7 @@ trl:
 chat_template: qwen_25
 datasets:
   - path: axolotl-ai-co/AceCode-87K
-    type: r1_grpo_code.axolotl_acecode_transform
+    type: grpo_code.transforms.axolotl_acecode_transform
     split: train
     
 dataset_prepared_path: /workspace/data/last_run_prepared
@@ -83,7 +83,7 @@ evals_per_epoch: 0
 saves_per_epoch: 0
 
 
-wandb_project: acecode-grpo-r[[1
+wandb_project: acecode-grpo-r1
 wandb_entity:
 wandb_name: passk
 hub_model_id: axolotl-ai-co/qwen2-3b-instruct-code-grpo

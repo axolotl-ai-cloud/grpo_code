@@ -1,0 +1,15 @@
+[project]
+name = "grpo_code"
+dependencies = [
+    "wasmtime",
+]
+version = "0.1.0"
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+where = [""]
+include = ["grpo_code*"]
