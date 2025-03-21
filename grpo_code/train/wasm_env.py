@@ -19,7 +19,7 @@ def extract_xml_answer(text):
 class PythonWasmEnvironment:
     """A reusable WASM environment for running Python code."""
 
-    def __init__(self, wasm_path="wasm/python-3.12.0.wasm", fuel=1_000_000_000):
+    def __init__(self, wasm_path="../wasm/python-3.12.0.wasm", fuel=1_000_000_000):
         """Initialize the WASM environment."""
         self.wasm_path = wasm_path
         self.fuel = fuel
@@ -259,7 +259,7 @@ def multiprocessing_does_compile_syntax_check_reward_func(completions: list[list
 
 
 if __name__ == "__main__":
-    for _ in range(100):
+    try:
         import time
 
         # Print CPU information
@@ -288,23 +288,12 @@ if __name__ == "__main__":
         print(f"Testing with {num_copies} copies of the example completion")
         print("-" * 100)
 
-        # test compile_reward_fun
-
-        # # Test compile_reward_func
-        # start_time = time.time()
-        # compile_results = compile_reward_func(large_completions)
-        # compile_time = time.time() - start_time
-        # print(compile_results)
-        # print(f"compile_reward_func time: {compile_time:.4f} seconds")
-        # print("-" * 100)
-
-        # Test multiprocessing_compiles_reward_func
+        # Test multiprocessing_compile_env_reward_func
         start_time = time.time()
         mp_compile_env_results = multiprocessing_compile_env_reward_func(large_completions)
         mp_compile_time = time.time() - start_time
         print(mp_compile_env_results)
-        print(f"multiprocessing_compiles_env_reward_func time: {mp_compile_time:.4f} seconds")
-        # print(f"Results match: {compile_results == mp_compile_env_results}")
+        print(f"multiprocessing_compile_env_reward_func time: {mp_compile_time:.4f} seconds")
         print("-" * 100)
 
         # Test multiprocessing_compiles_reward_func
@@ -313,69 +302,31 @@ if __name__ == "__main__":
         mp_compile_time = time.time() - start_time
         print(mp_compile_results)
         print(f"multiprocessing_compiles_reward_func time: {mp_compile_time:.4f} seconds")
-        # print(f"Results match: {compile_results == mp_compile_results}")
         print("-" * 100)
-
-        # Test calculate_accuracy (via a wrapper to match signature)
-        def accuracy_wrapper(completions, answers):
-            model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
-            return [
-                calculate_accuracy(model_answer, answer_list)
-                for model_answer, answer_list in zip(model_answers, answers)
-            ]
-
-        # start_time = time.time()
-        # accuracy_results = accuracy_wrapper(large_completions, large_answers)
-        # accuracy_time = time.time() - start_time
-        # print(f"accuracy_wrapper time: {accuracy_time:.4f} seconds")
 
         # Test multiprocessing_answer_reward_func
         start_time = time.time()
         mp_accuracy_results = multiprocessing_answer_reward_func(large_completions, large_answers)
         mp_accuracy_time = time.time() - start_time
         print(f"multiprocessing_answer_reward_func time: {mp_accuracy_time:.4f} seconds")
-        # print(f"Speedup: {accuracy_time / mp_accuracy_time:.2f}x")
-        # print(f"Results match: {accuracy_results == mp_accuracy_results}")
         print("-" * 100)
 
-        # test multiprocess_answer_env_reward_func
+        # Test multiprocessing_answer_env_reward_func
         start_time = time.time()
         mp_accuracy_env_results = multiprocessing_answer_env_reward_func(large_completions, large_answers)
         mp_accuracy_env_time = time.time() - start_time
         print(f"multiprocessing_answer_env_reward_func time: {mp_accuracy_env_time:.4f} seconds")
-        # print(f"Results match: {accuracy_results == mp_accuracy_env_results}")
         print("-" * 100)
 
-        # test soft_format_reward_func
-        start_time = time.time()
-        soft_format_results = soft_format_reward_func(large_completions)
-        soft_format_time = time.time() - start_time
-        print(soft_format_results)
-        print(f"soft_format_reward_func time: {soft_format_time:.4f} seconds")
-        print("-" * 100)
-
-        # test multiprocessing_soft_format_reward_func
+        # Test multiprocessing_soft_format_reward_func
         start_time = time.time()
         mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
         mp_soft_format_time = time.time() - start_time
         print(mp_soft_format_results)
         print(f"multiprocessing_soft_format_reward_func time: {mp_soft_format_time:.4f} seconds")
-        print(f"Results match: {soft_format_results == mp_soft_format_results}")
         print("-" * 100)
 
-        def syntax_check_wrapper(completions):
-            model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
-            return [does_compile_syntax_check(model_answer) for model_answer in model_answers]
-
-        # test syntax_check_wrapper
-        start_time = time.time()
-        syntax_check_results = syntax_check_wrapper(large_completions)
-        syntax_check_time = time.time() - start_time
-        print(syntax_check_results)
-        print(f"syntax_check_wrapper time: {syntax_check_time:.4f} seconds")
-        print("-" * 100)
-
-        # test multiprocessing_does_compile_syntax_check_reward_func
+        # Test multiprocessing_does_compile_syntax_check_reward_func
         start_time = time.time()
         mp_compile_syntax_check_results = multiprocessing_does_compile_syntax_check_reward_func(large_completions)
         mp_compile_syntax_check_time = time.time() - start_time
@@ -383,5 +334,8 @@ if __name__ == "__main__":
         print(
             f"multiprocessing_does_compile_syntax_check_reward_func time: {mp_compile_syntax_check_time:.4f} seconds"
         )
-        print(f"Results match: {syntax_check_results == mp_compile_syntax_check_results}")
         print("-" * 100)
+
+    finally:
+        # No explicit cleanup needed in this version as pools are created and destroyed per function call
+        pass
