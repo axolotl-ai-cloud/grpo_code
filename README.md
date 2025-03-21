@@ -6,8 +6,8 @@ uv venv
 source .venv/bin/activate
 uv pip install -e .
 uv pip install -U packaging setuptools wheel ninja
-uv pip install --no-build-isolation git+https://github.com/axolotl-ai-cloud/axolotl.git
-uv pip install vllm==0.7.2 flash-attn 
+git clone https://github.com/axolotl-ai-cloud/axolotl.git
+uv pip install --no-build-isolation axolotl[flash-attn,vllm,deepspeed]
 uv pip install --no-deps git+https://github.com/huggingface/trl.git@main
 ```
 

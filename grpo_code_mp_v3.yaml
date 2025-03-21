@@ -43,16 +43,16 @@ sample_packing: false
 eval_sample_packing: false
 pad_to_sequence_len: false
 
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 2
 micro_batch_size: 32
 num_epochs: 1
-max_steps: 6000
+max_steps: 10000
 
-optimizer: paged_adamw_32bit
+optimizer: adamw_torch_fused
 lr_scheduler: warmup_stable_decay
 lr_scheduler_kwargs:
-  num_stable_steps: 3800
-  num_decay_steps: 1200
+  num_stable_steps: 6000
+  num_decay_steps: 2000
   min_lr_ratio: 0.1
   num_cycles: 0.5
 # lr_scheduler: constant_with_warmup
@@ -73,7 +73,7 @@ gradient_checkpointing_kwargs:
   use_reentrant: false
 flash_attention: true
 
-warmup_steps: 1000
+warmup_steps: 2000
 evals_per_epoch: 0
 saves_per_epoch: 0
 

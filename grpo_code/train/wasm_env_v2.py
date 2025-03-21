@@ -16,11 +16,15 @@ def extract_xml_answer(text):
         return match.group(1).strip()
     return ""
 
+WASM_PATH = "/workspace/data/grpo_code/grpo_code/wasm/python-3.12.0.wasm"
+
+if not os.path.exists(WASM_PATH):
+    raise FileNotFoundError(f"WASM file not found at {WASM_PATH}")
 
 class PythonWasmEnvironment:
     """A reusable WASM environment for running Python code."""
 
-    def __init__(self, wasm_path="../wasm/python-3.12.0.wasm", fuel=1_000_000_000):
+    def __init__(self, wasm_path=WASM_PATH, fuel=1_000_000_000):
         """Initialize the WASM environment."""
         self.wasm_path = wasm_path
         self.fuel = fuel
@@ -70,7 +74,14 @@ def _cleanup_global_pool():
         _process_pool = None
 
 
-# Register cleanup function
+def sigHandler(signum, frame):
+    """Handle SIGTERM signal."""
+    print("SIGTERM signal received")
+    _process_pool.terminate()
+    _process_pool.join()
+    _process_pool = None
+
+signal.signal(signal.SIGTERM, sigHandler)
 atexit.register(_cleanup_global_pool)
 
 
