@@ -1,2 +1,2 @@
-from .train.wasm_env_v2 import *
+from .train.wasm_env import *
 from .transforms import *

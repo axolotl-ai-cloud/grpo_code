@@ -14,9 +14,9 @@ trl:
   use_vllm: true
   vllm_gpu_memory_utilization: 0.85
   reward_funcs:
-    - grpo_code.soft_format_reward_func
-    - grpo_code.multiprocessing_code_execution_reward_func
-    - grpo_code.multiprocessing_answer_execution_reward_func
+    - grpo_code.wasm_env_v2.multiprocessing_soft_format_reward_func
+    - grpo_code.wasm_env_v2.multiprocessing_code_execution_reward_func
+    - grpo_code.wasm_env_v2.multiprocessing_answer_execution_reward_func
   num_generations: 16
   max_completion_length: 512
   log_completions: false
@@ -43,16 +43,16 @@ sample_packing: false
 eval_sample_packing: false
 pad_to_sequence_len: false
 
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 2
 micro_batch_size: 32
 num_epochs: 1
-max_steps: 10000
+max_steps: 5000
 
 optimizer: adamw_torch_fused
 lr_scheduler: warmup_stable_decay
 lr_scheduler_kwargs:
-  num_stable_steps: 6000
-  num_decay_steps: 2500
+  num_stable_steps: 2500
+  num_decay_steps: 1500
   min_lr_ratio: 0.1
   num_cycles: 0.5
 # lr_scheduler: constant_with_warmup
@@ -63,7 +63,7 @@ train_on_inputs: false
 group_by_length: false
 
 bf16: true
-tf32: true  
+tf32: true
 early_stopping_patience:
 resume_from_checkpoint:
 local_rank:
@@ -73,10 +73,9 @@ gradient_checkpointing_kwargs:
   use_reentrant: false
 flash_attention: true
 
-warmup_steps: 1500
+warmup_steps: 1000
 evals_per_epoch: 0
 saves_per_epoch: 0
-save_steps: 0.5
 
 
 wandb_project: acecode-grpo-r1
