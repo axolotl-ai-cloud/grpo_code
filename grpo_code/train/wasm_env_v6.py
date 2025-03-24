@@ -219,98 +219,154 @@ if __name__ == "__main__":
         print(f"Using maximum of {MAX_PROCESSES} worker processes")
         print(f"Task timeout set to {TASK_TIMEOUT} seconds")
 
-        # Create test cases with both valid and invalid code
-        test_completions = [
-            [  # Valid code
+        example_completion = [
+            [
                 {
                     "role": "user",
                     "content": """
-                    <reasoning>
-                    We need to implement a function that increments its input by 1.
-                    </reasoning>
-                    <answer>
-                    def foo(a):
-                        return a + 1
-                    </answer>""",
+        <reasoning>
+        We need to implement a function that increments its input by 1.
+        </reasoning>
+        <answer>
+        def foo(a):
+            return a + 1
+        </answer>""",
                 }
-            ],
-            [  # Syntax error
+            ]
+        ]
+        num_copies = 32
+        large_completions = example_completion * num_copies
+        large_answers = [["assert foo(1) == 2", "assert foo(2) == 3"]] * num_copies
+
+        # Number of runs for averaging
+        num_runs = 100
+        
+        print("-" * 100)
+        print(f"Testing with {num_copies} copies of the example completion")
+        print(f"Running each test {num_runs} times and reporting averages")
+        print(f"Using timeout-aware ProcessPoolExecutor with {MAX_PROCESSES} max workers")
+        print("-" * 100)
+
+        # Run each test multiple times and track total execution times
+        mp_execution_total_time = 0
+        mp_answer_execution_total_time = 0
+        mp_soft_format_total_time = 0
+        soft_format_total_time = 0
+        total_run_time = 0
+
+        for i in range(num_runs):
+            run_start_time = time.time()
+            
+            # print(f"Run {i+1}/{num_runs}...")
+                
+            # Test code execution reward function
+            start_time = time.time()
+            mp_execution_results = multiprocessing_code_execution_reward_func(large_completions)
+            mp_execution_time = time.time() - start_time
+            mp_execution_total_time += mp_execution_time
+            # print(f"  Code execution: {mp_execution_time:.4f}s")
+
+            # Test multiprocessing_answer_execution_reward_func
+            start_time = time.time()
+            mp_answer_execution_results = multiprocessing_answer_execution_reward_func(large_completions, large_answers)
+            mp_answer_time = time.time() - start_time
+            mp_answer_execution_total_time += mp_answer_time
+            # print(f"  Answer execution: {mp_answer_time:.4f}s")
+
+            # Test multiprocessing_soft_format_reward_func
+            start_time = time.time()
+            mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
+            mp_soft_format_time = time.time() - start_time
+            mp_soft_format_total_time += mp_soft_format_time
+            # print(f"  Format check: {mp_soft_format_time:.4f}s")
+
+            # Test soft_format_reward_func
+            start_time = time.time()
+            soft_format_results = soft_format_reward_func(large_completions)
+            soft_format_time = time.time() - start_time
+            soft_format_total_time += soft_format_time
+            # print(f"  Non-MP format check: {soft_format_time:.4f}s")
+            
+            # Calculate total time for this run
+            run_time = time.time() - run_start_time
+            total_run_time += run_time
+            
+            # print(f"  Run {i+1} completed in {run_time:.4f} seconds")
+
+        # Calculate and print average times
+        print("-" * 100)
+        print("AVERAGE EXECUTION TIMES OVER", num_runs, "RUNS:")
+        print("-" * 100)
+        print(f"multiprocessing_code_execution_reward_func avg time: {mp_execution_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_answer_execution_reward_func avg time: {mp_answer_execution_total_time/num_runs:.4f} seconds")
+        print(f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds")
+        print(f"soft_format_reward_func avg time: {soft_format_total_time/num_runs:.4f} seconds")
+        print(f"Average total time per run: {total_run_time/num_runs:.4f} seconds")
+        print(f"Total benchmark time: {total_run_time:.4f} seconds")
+        print("-" * 100)
+
+        # Manual test with the 60% accuracy case
+        print("\n" + "=" * 80)
+        print("MANUAL TEST: multiprocessing_answer_execution_reward_func")
+        print("=" * 80)
+
+        # Create a simple test case - function that only works with positive numbers
+        test_completion = [
+            [
                 {
                     "role": "user",
                     "content": """
-                    <reasoning>
-                    This code has a syntax error.
-                    </reasoning>
-                    <answer>
-                    def foo(a)
-                        return a + 1  # Missing colon
-                    </answer>""",
-                }
-            ],
-            [  # Runtime error
-                {
-                    "role": "user",
-                    "content": """
-                    <reasoning>
-                    This code will cause a runtime error.
-                    </reasoning>
-                    <answer>
-                    def foo(a):
-                        return a + undefined_variable
-                    </answer>""",
-                }
-            ],
-            [  # Memory intensive
-                {
-                    "role": "user",
-                    "content": """
-                    <reasoning>
-                    This code uses a lot of memory.
-                    </reasoning>
-                    <answer>
-                    def foo(a):
-                        x = [1] * 1000000  # Large list
-                        return a + len(x)
-                    </answer>""",
+        <reasoning>
+        Let's create a function that adds two numbers, but it only handles positive numbers correctly.
+        </reasoning>
+        <answer>
+        def add(a, b):
+            if a < 0 or b < 0:
+                return 0  # Incorrect for negative numbers
+            return a + b  # Correct for positive numbers
+        </answer>"""
                 }
             ]
         ]
 
-        # Create corresponding test cases
-        test_answers = [
-            ["assert foo(1) == 2", "assert foo(2) == 3"],  # Valid tests
-            ["assert foo(1) == 2"],  # Won't run due to syntax error
-            ["assert foo(1) == 2"],  # Won't run due to runtime error
-            ["assert foo(1) == 1000001"]  # Memory intensive test
-        ]
+        # Test cases - 3 should pass, 2 should fail (60% accuracy)
+        test_answers = [[
+            "assert add(1, 2) == 3",  # Pass
+            "assert add(5, 7) == 12",  # Pass
+            "assert add(10, 20) == 30",  # Pass
+            "assert add(-1, 5) == 4",  # Fail - will return 0
+            "assert add(-5, -10) == -15"  # Fail - will return 0
+        ]]
 
-        # Number of copies to simulate load
-        num_copies = 8
-        large_completions = test_completions * num_copies
-        large_answers = test_answers * num_copies
+        print("Input code:")
+        print(extract_xml_answer(test_completion[0][0]["content"]))
+        print("\nTest cases:")
+        for tc in test_answers[0]:
+            print(f"- {tc}")
 
-        print("-" * 100)
-        print(f"Testing with {len(large_completions)} total test cases ({num_copies} copies of each type)")
-        print("Test cases include: valid code, syntax errors, runtime errors, and memory-intensive code")
-        print("-" * 100)
+        # Run the function and measure time
+        print("\nExecuting test...")
+        start_time = time.time()
+        results = multiprocessing_answer_execution_reward_func(test_completion, test_answers)
+        elapsed = time.time() - start_time
 
-        # Run tests multiple times to observe behavior
-        num_runs = 10
-        for i in range(num_runs):
-            print(f"\nRun {i+1}/{num_runs}")
-            
-            start_time = time.time()
-            results = multiprocessing_code_execution_reward_func(large_completions)
-            execution_time = time.time() - start_time
-            
-            # Count different result types
-            successes = sum(1 for r in results if r == 0.5)
-            failures = sum(1 for r in results if r == -0.25)
-            
-            print(f"Execution time: {execution_time:.2f}s")
-            print(f"Results: {len(results)} total, {successes} successes, {failures} failures")
-            print(f"Average reward: {sum(results)/len(results):.3f}")
+        print(f"\nResults: {results}")
+        print(f"Execution time: {elapsed:.4f} seconds")
+
+        # Calculate the expected reward (accuracy^3 * 2)
+        expected_reward = math.pow(3/5, 3) * 2
+        print(f"Expected reward with 3/5 accuracy: {expected_reward:.4f}")
+
+        # Add assertion for partial success implementation 
+        # Allow some floating point tolerance
+        assert abs(results[0] - expected_reward) < 0.1, f"Expected ~{expected_reward:.4f} for 60% accuracy, got {results[0]}"
+        print("✅ Assertion passed: 60% correct implementation received expected reward")
+
+        print("\nSimulation test - handling timeouts")
+        print("=" * 80)
+        
 
     finally:
+        # Ensure executor is cleaned up
         cleanup_executor()
-        print("\nTest completed - executor cleaned up") 
+        print("Test completed - all pools should be properly shut down") 
