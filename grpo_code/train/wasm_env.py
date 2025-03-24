@@ -249,8 +249,7 @@ if __name__ == "__main__":
         ...
         </reasoning>
         <answer>
-        def foo(a):
-            return a + 1
+        sleep(1000000)
         </answer>""",
                 }
             ]

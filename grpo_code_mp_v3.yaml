@@ -43,10 +43,11 @@ sample_packing: false
 eval_sample_packing: false
 pad_to_sequence_len: false
 
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 2
 micro_batch_size: 32
 num_epochs: 1
 max_steps: 10000
+
 
 optimizer: adamw_torch_fused
 lr_scheduler: warmup_stable_decay
