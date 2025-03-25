@@ -8,19 +8,20 @@ uv pip install -e .
 uv pip install -U packaging setuptools wheel ninja
 git clone https://github.com/axolotl-ai-cloud/axolotl.git
 uv pip install --no-build-isolation axolotl[flash-attn,vllm,deepspeed]
-uv pip install --no-deps git+https://github.com/huggingface/trl.git@main
+uv pip install trl==0.15.2
 ```
 
+## Training
 
-## Evals
+The following environment variables can be used to modify the behaviour of the reward functions:
+- `WASM_FUEL` - Controls the amount of fuel (computation resources) allocated to the WASM environment (default: 10000000000)
+- `WASM_PATH` - Path to the Python WASM runtime file (default: "./wasm/python-3.12.0.wasm")
+- `TIMEOUT` - Maximum execution time in seconds for code evaluation (default: 5)
+- `MAX_WORKERS` - Number of parallel workers for multiprocessing reward functions (default: 4)
 
-https://github.com/huggingface/ioi
-
-https://livecodebench.github.io/
-
-https://github.com/QwenLM/Qwen2.5-Coder/tree/main/qwencoder-eval/instruct
-
-https://github.com/bigcode-project/bigcode-evaluation-harness/tree/main
+```bash
+MAX_WORKERS=64 axolotl train r1_acecode.yaml
+```
 
 ## Python WASM Runtime
 
