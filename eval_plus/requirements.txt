@@ -1,0 +1,12 @@
+
+stop-sequencer
+evalplus==0.2.1
+
+rich
+accelerate
+vllm==0.6.6
+stop-sequencer
+evalplus
+setuptools
+scipy
+

@@ -1,3 +1,5 @@
+Sourced from the [Qwen2.5-Coder repository](https://github.com/QwenLM/Qwen2.5-Coder/tree/main/qwencoder-eval/instruct/eval_plus) with updated dependencies for better reproducability.
+
 ## Evaluation for HumanEval(+) and MBPP(+)
 
 This folder contains the code and scripts to evaluate the performance of the **QwenCoder-2.5** series models on [**EvalPlus**](https://github.com/evalplus/evalplus) benchmark, which includes HumanEval(+) and MBPP(+) datasets. These datasets are designed to test code generation capabilities under varied conditions.
