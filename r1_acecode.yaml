@@ -1,0 +1,86 @@
+base_model: Qwen/Qwen2.5-3B-Instruct
+# Automatically upload checkpoint and final model to HF
+# hub_model_id: username/custom_model_name
+
+load_in_8bit: false
+load_in_4bit: false
+strict: false
+
+torch_compile: true
+
+rl: grpo
+trl:
+  beta: 0.001
+  use_vllm: true
+  vllm_gpu_memory_utilization: 0.85
+  reward_funcs:
+    - grpo_code.rewards.soft_format_reward_func
+    - grpo_code.rewards.code_execution_reward_func
+    - grpo_code.rewards.answer_execution_reward_func
+  num_generations: 16
+  max_completion_length: 512
+  log_completions: false
+
+chat_template: qwen_25
+datasets:
+  - path: axolotl-ai-co/AceCode-87K
+    type: grpo_code.transforms.axolotl_acecode_transform
+    split: train
+    
+dataset_prepared_path: /workspace/data/last_run_prepared
+dataset_processes:
+skip_prepare_dataset: true
+val_set_size: 0.0
+output_dir: /workspace/data/axolotl-artifacts/r1-outputs/1403
+
+dataloader_prefetch_factor: 32
+dataloader_num_workers: 2
+dataloader_pin_memory: true
+
+gc_steps: 1
+sequence_len: 1024
+sample_packing: false
+eval_sample_packing: false
+pad_to_sequence_len: false
+
+gradient_accumulation_steps: 2
+micro_batch_size: 32
+num_epochs: 1
+max_steps: 10000
+
+
+optimizer: adamw_torch_fused
+lr_scheduler: warmup_stable_decay
+lr_scheduler_kwargs:
+  num_stable_steps: 6000
+  num_decay_steps: 2500
+  min_lr_ratio: 0.1
+  num_cycles: 0.5
+# lr_scheduler: constant_with_warmup
+learning_rate: 5.3e-6
+max_grad_norm: 1.0
+
+train_on_inputs: false
+group_by_length: false
+
+bf16: true
+tf32: true  
+early_stopping_patience:
+resume_from_checkpoint:
+local_rank:
+logging_steps: 1
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+flash_attention: true
+
+warmup_steps: 1500
+evals_per_epoch: 0
+saves_per_epoch: 0
+save_steps: 0.5
+
+
+wandb_project: acecode-grpo-r1
+wandb_entity:
+wandb_name: passk
+hub_model_id: axolotl-ai-co/qwen2-3b-instruct-code-grpo-v3
