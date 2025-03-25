@@ -15,53 +15,53 @@ def extract_xml_answer(text):
         return match.group(1).strip()
     return ""
 
-WASM_PATH = "/workspace/data/grpo_code/grpo_code/wasm/python-3.12.0.wasm"
+WASM_PATH = os.getenv("WASM_PATH", "/workspace/data/grpo_code/grpo_code/wasm/python-3.12.0.wasm")
 
 if not os.path.exists(WASM_PATH):
     raise FileNotFoundError(f"WASM file not found at {WASM_PATH}")
 
 
-class PythonWasmEnvironment:
-    """A reusable WASM environment for running Python code."""
+# class PythonWasmEnvironment:
+#     """A reusable WASM environment for running Python code."""
 
-    def __init__(self, wasm_path=WASM_PATH, fuel=1_000_000_000):
-        """Initialize the WASM environment."""
-        self.wasm_path = wasm_path
-        self.fuel = fuel
+#     def __init__(self, wasm_path=WASM_PATH, fuel=1_000_000_000):
+#         """Initialize the WASM environment."""
+#         self.wasm_path = wasm_path
+#         self.fuel = fuel
 
-        # Set up the engine and linker
-        engine_cfg = Config()
-        engine_cfg.consume_fuel = True
-        engine_cfg.cache = True
+#         # Set up the engine and linker
+#         engine_cfg = Config()
+#         engine_cfg.consume_fuel = True
+#         engine_cfg.cache = True
 
-        self.engine = Engine(engine_cfg)
-        self.linker = Linker(self.engine)
-        self.linker.define_wasi()
+#         self.engine = Engine(engine_cfg)
+#         self.linker = Linker(self.engine)
+#         self.linker.define_wasi()
 
-        # Load the Python module
-        self.python_module = Module.from_file(self.engine, self.wasm_path)
+#         # Load the Python module
+#         self.python_module = Module.from_file(self.engine, self.wasm_path)
 
-    def run_code(self, code):
-        """Run Python code in the WASM environment."""
-        config = WasiConfig()
-        config.argv = ("python", "-c", code)
+#     def run_code(self, code):
+#         """Run Python code in the WASM environment."""
+#         config = WasiConfig()
+#         config.argv = ("python", "-c", code)
 
-        store = Store(self.engine)
-        store.set_fuel(self.fuel)
-        store.set_wasi(config)
+#         store = Store(self.engine)
+#         store.set_fuel(self.fuel)
+#         store.set_wasi(config)
 
-        instance = self.linker.instantiate(store, self.python_module)
-        start = instance.exports(store)["_start"]
+#         instance = self.linker.instantiate(store, self.python_module)
+#         start = instance.exports(store)["_start"]
 
-        start(store)
-
+#         start(store)
+from grpo_code.wasm.wasm import PythonWasmEnvironment
 
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
 MAX_PROCESSES = int(os.environ.get("MAX_PROCESSES", 128)) // WORLD_SIZE
 
 try:
     global env
-    env = PythonWasmEnvironment()
+    env = PythonWasmEnvironment(wasm_path=WASM_PATH, fuel=1_000_000_000)
 except Exception as e:
     print("Error initializing PythonWasmEnvironment")
     print(e)

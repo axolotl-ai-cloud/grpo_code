@@ -1,26 +1,36 @@
-from concurrent.futures import ProcessPoolExecutor, TimeoutError, BrokenExecutor
-import os
-import multiprocessing
-import re
-import time
-from wasmtime import Config, Engine, Linker, Module, Store, WasiConfig
-import math
 import atexit
+import math
+import multiprocessing
+import os
+import re
 import signal
 import sys
+import time
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor, TimeoutError
+from pathlib import Path
+
+from wasmtime import Config, Engine, Linker, Module, Store, WasiConfig
+
+import grpo_code
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Compile regex patterns once for better performance
 ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
-FORMAT_PATTERN = re.compile(r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>.*", re.DOTALL)
+FORMAT_PATTERN = re.compile(
+    r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>.*", re.DOTALL
+)
+
 
 def extract_xml_answer(text):
     """Extract the answer from the XML tags using compiled regex."""
-    match = ANSWER_PATTERN.search(text)
+    match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
     return match.group(1).strip() if match else ""
 
-WASM_PATH = "/workspace/data/grpo_code/grpo_code/wasm/python-3.12.0.wasm"
+
+WASM_PATH = os.environ.get(
+    "WASM_PATH", Path(grpo_code.__file__).parent.parent / "wasm" / "python-3.12.0.wasm"
+)
 
 if not os.path.exists(WASM_PATH):
     raise FileNotFoundError(f"WASM file not found at {WASM_PATH}")
@@ -32,23 +42,28 @@ MAX_PROCESSES = int(os.environ.get("MAX_PROCESSES", 32)) // WORLD_SIZE
 # Task timeout - maximum time (in seconds) to wait for a worker to complete a task
 TASK_TIMEOUT = int(os.environ.get("TASK_TIMEOUT", 1))
 
-# Global executor
 _executor = None
 
-def get_executor():
-    """Get or create the global ProcessPoolExecutor."""
-    global _executor
-    if _executor is None:
-        _executor = ProcessPoolExecutor(
-            max_workers=MAX_PROCESSES,
-            initializer=worker_init
-        )
-        # Register cleanup on exit
-        atexit.register(cleanup_executor)
-        # Register signal handlers
-        signal.signal(signal.SIGINT, cleanup_and_exit)
-        signal.signal(signal.SIGTERM, cleanup_and_exit)
-    return _executor
+from grpo_code.wasm import PythonWasmEnvironment
+
+
+# Worker function with initialization
+def worker_init():
+    """Initialize worker-specific environment."""
+    global worker_env
+    worker_env = PythonWasmEnvironment(wasm_path=WASM_PATH, fuel=1_000_000_000)
+
+
+def runs_without_error(code: str) -> float:
+    """Execute code in the worker's WASM environment and check if it runs without errors."""
+    global worker_env
+    try:
+        worker_env.run_code(code)
+        return 1.0
+    except Exception as e:
+        print(f"Error running code: {e}")
+        return 0.0
+
 
 def cleanup_executor():
     """Cleanup the global executor."""
@@ -58,72 +73,29 @@ def cleanup_executor():
         _executor.shutdown(wait=False)
         _executor = None
 
+
 def cleanup_and_exit(signum, frame):
     """Clean up and exit on signals."""
     print(f"Received signal {signum}, cleaning up...")
     cleanup_executor()
     sys.exit(0)
 
-class PythonWasmEnvironment:
-    """A reusable WASM environment for running Python code."""
-
-    def __init__(self, wasm_path=WASM_PATH, fuel=1_000_000_000):
-        """Initialize the WASM environment."""
-        self.wasm_path = wasm_path
-        self.fuel = fuel
-
-        # Set up the engine and linker
-        engine_cfg = Config()
-        engine_cfg.consume_fuel = True
-        engine_cfg.cache = True
-
-        self.engine = Engine(engine_cfg)
-        self.linker = Linker(self.engine)
-        self.linker.define_wasi()
-
-        # Load the Python module
-        self.python_module = Module.from_file(self.engine, self.wasm_path)
-
-    def run_code(self, code):
-        """Run Python code in the WASM environment with timeout."""
-        config = WasiConfig()
-        config.argv = ("python", "-c", code)
-        config.inherit_env = False
-
-        store = Store(self.engine)
-        store.set_fuel(self.fuel)
-        store.set_wasi(config)
-
-        instance = self.linker.instantiate(store, self.python_module)
-        start = instance.exports(store)["_start"]
-        start(store)
-
-# Worker function with initialization
-def worker_init():
-    """Initialize worker-specific environment."""
-    global worker_env
-    worker_env = PythonWasmEnvironment()
-
-def runs_without_error(code: str) -> float:
-    """Execute code in the worker's WASM environment and check if it runs without errors."""
-    global worker_env
-    try:
-        worker_env.run_code(code)
-        return 1.0
-    except Exception as e:
-        return 0.0
 
 def check_format(text):
     """Check if text follows the expected format pattern."""
-    return 0.25 if FORMAT_PATTERN.match(text) else 0.0
+    return (
+        0.25
+        if re.match(r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>.*", text, re.S)
+        else 0.0
+    )
+
 
 def get_executor():
     """Get or create the global ProcessPoolExecutor."""
     global _executor
     if _executor is None:
         _executor = ProcessPoolExecutor(
-            max_workers=MAX_PROCESSES,
-            initializer=worker_init
+            max_workers=MAX_PROCESSES, initializer=worker_init
         )
         # Register cleanup on exit
         atexit.register(cleanup_executor)
@@ -132,20 +104,23 @@ def get_executor():
         signal.signal(signal.SIGTERM, cleanup_and_exit)
     return _executor
 
+
 def run_with_executor(func, tasks, timeout=TASK_TIMEOUT):
     """Run tasks using the global ProcessPoolExecutor with timeout and error handling."""
     global _executor
-    
+
     executor = get_executor()
     futures = [executor.submit(func, task) for task in tasks]
-    
+
     results = []
     for future in futures:
         try:
             result = future.result(timeout=timeout)
             results.append(result)
         except TimeoutError:
-            print(f"WARNING: Task timed out after {timeout} seconds, recreating process pool...")
+            print(
+                f"WARNING: Task timed out after {timeout} seconds, recreating process pool..."
+            )
             cleanup_executor()  # Clean up the old executor
             results.append(0.0)
         except BrokenExecutor:
@@ -155,22 +130,29 @@ def run_with_executor(func, tasks, timeout=TASK_TIMEOUT):
         except Exception as e:
             print(f"WARNING: Task failed with error: {e}")
             results.append(0.0)
-    
+
     return results
 
-# Reward functions using ProcessPoolExecutor
-def multiprocessing_code_execution_reward_func(completions: list[list[dict]], **kwargs) -> list[float]:
+
+def multiprocessing_code_execution_reward_func(
+    completions: list[list[dict]], **kwargs
+) -> list[float]:
     """Reward function for executing the code."""
-    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
+    model_answers = [
+        extract_xml_answer(completion[0]["content"]) for completion in completions
+    ]
     results = run_with_executor(runs_without_error, model_answers)
     return [0.5 if result == 1.0 else -0.25 for result in results]
+
 
 def multiprocessing_answer_execution_reward_func(
     completions: list[list[dict]], answers: list[list[str]], **kwargs
 ) -> list[float]:
     """Reward function for executing the code with test cases."""
-    model_answers = [extract_xml_answer(completion[0]["content"]) for completion in completions]
-    
+    model_answers = [
+        extract_xml_answer(completion[0]["content"]) for completion in completions
+    ]
+
     # Prepare all test cases
     tasks = []
     test_indices = []
@@ -178,17 +160,17 @@ def multiprocessing_answer_execution_reward_func(
         for test in tests:
             tasks.append(code + "\n" + test)
             test_indices.append(i)
-    
+
     # Run all tests
     results = run_with_executor(runs_without_error, tasks)
-    
+
     # Group results by completion
     completion_results = {}
     for idx, result in zip(test_indices, results):
         if idx not in completion_results:
             completion_results[idx] = []
         completion_results[idx].append(result)
-    
+
     # Calculate rewards
     rewards = []
     for i in range(len(completions)):
@@ -199,18 +181,15 @@ def multiprocessing_answer_execution_reward_func(
         else:
             reward = 0.0
         rewards.append(reward)
-    
+
     return rewards
 
-def multiprocessing_soft_format_reward_func(completions, **kwargs) -> list[float]:
-    """Reward function that loosely checks if the completion has a specific format."""
-    responses = [completion[0]["content"] for completion in completions]
-    return run_with_executor(check_format, responses)
 
 def soft_format_reward_func(completions, **kwargs) -> list[float]:
     """Non-multiprocessing version of format checking."""
     responses = [completion[0]["content"] for completion in completions]
     return [check_format(r) for r in responses]
+
 
 if __name__ == "__main__":
     try:
@@ -240,11 +219,13 @@ if __name__ == "__main__":
 
         # Number of runs for averaging
         num_runs = 100
-        
+
         print("-" * 100)
         print(f"Testing with {num_copies} copies of the example completion")
         print(f"Running each test {num_runs} times and reporting averages")
-        print(f"Using timeout-aware ProcessPoolExecutor with {MAX_PROCESSES} max workers")
+        print(
+            f"Using timeout-aware ProcessPoolExecutor with {MAX_PROCESSES} max workers"
+        )
         print("-" * 100)
 
         # Run each test multiple times and track total execution times
@@ -256,26 +237,32 @@ if __name__ == "__main__":
 
         for i in range(num_runs):
             run_start_time = time.time()
-            
+
             # print(f"Run {i+1}/{num_runs}...")
-                
+
             # Test code execution reward function
             start_time = time.time()
-            mp_execution_results = multiprocessing_code_execution_reward_func(large_completions)
+            mp_execution_results = multiprocessing_code_execution_reward_func(
+                large_completions
+            )
             mp_execution_time = time.time() - start_time
             mp_execution_total_time += mp_execution_time
             # print(f"  Code execution: {mp_execution_time:.4f}s")
 
             # Test multiprocessing_answer_execution_reward_func
             start_time = time.time()
-            mp_answer_execution_results = multiprocessing_answer_execution_reward_func(large_completions, large_answers)
+            mp_answer_execution_results = multiprocessing_answer_execution_reward_func(
+                large_completions, large_answers
+            )
             mp_answer_time = time.time() - start_time
             mp_answer_execution_total_time += mp_answer_time
             # print(f"  Answer execution: {mp_answer_time:.4f}s")
 
             # Test multiprocessing_soft_format_reward_func
             start_time = time.time()
-            mp_soft_format_results = multiprocessing_soft_format_reward_func(large_completions)
+            mp_soft_format_results = multiprocessing_soft_format_reward_func(
+                large_completions
+            )
             mp_soft_format_time = time.time() - start_time
             mp_soft_format_total_time += mp_soft_format_time
             # print(f"  Format check: {mp_soft_format_time:.4f}s")
@@ -286,21 +273,29 @@ if __name__ == "__main__":
             soft_format_time = time.time() - start_time
             soft_format_total_time += soft_format_time
             # print(f"  Non-MP format check: {soft_format_time:.4f}s")
-            
+
             # Calculate total time for this run
             run_time = time.time() - run_start_time
             total_run_time += run_time
-            
+
             # print(f"  Run {i+1} completed in {run_time:.4f} seconds")
 
         # Calculate and print average times
         print("-" * 100)
         print("AVERAGE EXECUTION TIMES OVER", num_runs, "RUNS:")
         print("-" * 100)
-        print(f"multiprocessing_code_execution_reward_func avg time: {mp_execution_total_time/num_runs:.4f} seconds")
-        print(f"multiprocessing_answer_execution_reward_func avg time: {mp_answer_execution_total_time/num_runs:.4f} seconds")
-        print(f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds")
-        print(f"soft_format_reward_func avg time: {soft_format_total_time/num_runs:.4f} seconds")
+        print(
+            f"multiprocessing_code_execution_reward_func avg time: {mp_execution_total_time/num_runs:.4f} seconds"
+        )
+        print(
+            f"multiprocessing_answer_execution_reward_func avg time: {mp_answer_execution_total_time/num_runs:.4f} seconds"
+        )
+        print(
+            f"multiprocessing_soft_format_reward_func avg time: {mp_soft_format_total_time/num_runs:.4f} seconds"
+        )
+        print(
+            f"soft_format_reward_func avg time: {soft_format_total_time/num_runs:.4f} seconds"
+        )
         print(f"Average total time per run: {total_run_time/num_runs:.4f} seconds")
         print(f"Total benchmark time: {total_run_time:.4f} seconds")
         print("-" * 100)
@@ -324,19 +319,21 @@ if __name__ == "__main__":
             if a < 0 or b < 0:
                 return 0  # Incorrect for negative numbers
             return a + b  # Correct for positive numbers
-        </answer>"""
+        </answer>""",
                 }
             ]
         ]
 
         # Test cases - 3 should pass, 2 should fail (60% accuracy)
-        test_answers = [[
-            "assert add(1, 2) == 3",  # Pass
-            "assert add(5, 7) == 12",  # Pass
-            "assert add(10, 20) == 30",  # Pass
-            "assert add(-1, 5) == 4",  # Fail - will return 0
-            "assert add(-5, -10) == -15"  # Fail - will return 0
-        ]]
+        test_answers = [
+            [
+                "assert add(1, 2) == 3",  # Pass
+                "assert add(5, 7) == 12",  # Pass
+                "assert add(10, 20) == 30",  # Pass
+                "assert add(-1, 5) == 4",  # Fail - will return 0
+                "assert add(-5, -10) == -15",  # Fail - will return 0
+            ]
+        ]
 
         print("Input code:")
         print(extract_xml_answer(test_completion[0][0]["content"]))
@@ -347,26 +344,31 @@ if __name__ == "__main__":
         # Run the function and measure time
         print("\nExecuting test...")
         start_time = time.time()
-        results = multiprocessing_answer_execution_reward_func(test_completion, test_answers)
+        results = multiprocessing_answer_execution_reward_func(
+            test_completion, test_answers
+        )
         elapsed = time.time() - start_time
 
         print(f"\nResults: {results}")
         print(f"Execution time: {elapsed:.4f} seconds")
 
         # Calculate the expected reward (accuracy^3 * 2)
-        expected_reward = math.pow(3/5, 3) * 2
+        expected_reward = math.pow(3 / 5, 3) * 2
         print(f"Expected reward with 3/5 accuracy: {expected_reward:.4f}")
 
-        # Add assertion for partial success implementation 
+        # Add assertion for partial success implementation
         # Allow some floating point tolerance
-        assert abs(results[0] - expected_reward) < 0.1, f"Expected ~{expected_reward:.4f} for 60% accuracy, got {results[0]}"
-        print("✅ Assertion passed: 60% correct implementation received expected reward")
+        assert (
+            abs(results[0] - expected_reward) < 0.1
+        ), f"Expected ~{expected_reward:.4f} for 60% accuracy, got {results[0]}"
+        print(
+            "✅ Assertion passed: 60% correct implementation received expected reward"
+        )
 
         print("\nSimulation test - handling timeouts")
         print("=" * 80)
-        
 
     finally:
         # Ensure executor is cleaned up
         cleanup_executor()
-        print("Test completed - all pools should be properly shut down") 
+        print("Test completed - all pools should be properly shut down")
